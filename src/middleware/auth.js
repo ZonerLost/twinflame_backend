@@ -21,10 +21,34 @@ async function authenticate(req, res, next) {
     req.userId = data.user.id;
     req.userEmail = data.user.email;
     req.userPhone = data.user.phone;
+
+    // Check account status
+    const { data: userData } = await supabase
+      .from("users")
+      .select("account_status")
+      .eq("id", data.user.id)
+      .single();
+
+    if (userData?.account_status === "banned") {
+      return errorResponse(res, "Your account has been banned. Contact support for more information.", 403);
+    }
+
+    req.accountStatus = userData?.account_status || "active";
     next();
   } catch (err) {
     return errorResponse(res, "Authentication failed", 401);
   }
 }
 
-module.exports = { authenticate };
+// Middleware to check if account is active (not suspended or banned)
+function requireActiveAccount(req, res, next) {
+  if (req.accountStatus === "suspended") {
+    return errorResponse(res, "Your account is suspended. This action is not available.", 403);
+  }
+  if (req.accountStatus === "banned") {
+    return errorResponse(res, "Your account has been banned.", 403);
+  }
+  next();
+}
+
+module.exports = { authenticate, requireActiveAccount };

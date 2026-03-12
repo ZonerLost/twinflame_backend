@@ -2,7 +2,7 @@ const express = require("express");
 const router = express.Router();
 const Joi = require("joi");
 const subscriptionController = require("../controllers/subscription.controller");
-const { authenticate } = require("../middleware/auth");
+const { authenticate, requireActiveAccount } = require("../middleware/auth");
 const { validate } = require("../middleware/validate");
 
 const subscribeSchema = Joi.object({
@@ -18,8 +18,8 @@ router.use(authenticate);
 
 router.get("/plans", subscriptionController.getPlans);
 router.get("/status", subscriptionController.getCurrentSubscription);
-router.post("/subscribe", validate(subscribeSchema), subscriptionController.subscribe);
-router.post("/confirm", validate(confirmSchema), subscriptionController.confirmSubscription);
+router.post("/subscribe", requireActiveAccount, validate(subscribeSchema), subscriptionController.subscribe);
+router.post("/confirm", requireActiveAccount, validate(confirmSchema), subscriptionController.confirmSubscription);
 router.post("/cancel", subscriptionController.cancelSubscription);
 
 module.exports = router;
