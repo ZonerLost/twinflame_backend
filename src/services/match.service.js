@@ -23,6 +23,15 @@ class MatchService {
     const swipedIds = (swipedRows || []).map((r) => r.swiped_id);
     swipedIds.push(userId); // Exclude self
 
+    // Get suspended/banned user IDs to exclude
+    const { data: restrictedUsers } = await supabase
+      .from("users")
+      .select("id")
+      .in("account_status", ["suspended", "banned"]);
+
+    const restrictedIds = (restrictedUsers || []).map((u) => u.id);
+    const allExcluded = [...new Set([...swipedIds, ...restrictedIds])];
+
     // Build query for discovering profiles
     let query = supabase
       .from("profiles")
@@ -30,7 +39,7 @@ class MatchService {
         user_id, full_name, biography, gender, date_of_birth,
         marital_status, looking_for, location_text, latitude, longitude
       `)
-      .not("user_id", "in", `(${swipedIds.join(",")})`)
+      .not("user_id", "in", `(${allExcluded.join(",")})`)
       .not("full_name", "is", null)
       .range(offset, offset + limit - 1);
 

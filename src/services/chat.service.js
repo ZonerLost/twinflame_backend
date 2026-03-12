@@ -86,6 +86,17 @@ class ChatService {
 
   // ---- SEND MESSAGE ----
   async sendMessage(userId, conversationId, { content, messageType = "text" }) {
+    // Check if user is suspended
+    const { data: userData } = await supabase
+      .from("users")
+      .select("account_status")
+      .eq("id", userId)
+      .single();
+
+    if (userData?.account_status === "suspended") {
+      throw Object.assign(new Error("Your account is suspended. You cannot send messages."), { statusCode: 403 });
+    }
+
     await this._verifyConversationAccess(userId, conversationId);
 
     const { data: message, error } = await supabase

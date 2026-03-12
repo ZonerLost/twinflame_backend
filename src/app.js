@@ -14,6 +14,10 @@ const subscriptionRoutes = require("./routes/subscription.routes");
 const notificationRoutes = require("./routes/notification.routes");
 const friendRoutes = require("./routes/friend.routes");
 const postRoutes = require("./routes/post.routes");
+const flameRoutes = require("./routes/flame.routes");
+const moderationRoutes = require("./routes/moderation.routes");
+const locationRoutes = require("./routes/location.routes");
+const friendRequestRoutes = require("./routes/friend-request.routes");
 
 const app = express();
 
@@ -39,6 +43,10 @@ app.use("/api/subscription", subscriptionRoutes);
 app.use("/api/notifications", notificationRoutes);
 app.use("/api/friends", friendRoutes);
 app.use("/api/posts", postRoutes);
+app.use("/api/flames", flameRoutes);
+app.use("/api/moderation", moderationRoutes);
+app.use("/api/location", locationRoutes);
+app.use("/api/friend-requests", friendRequestRoutes);
 
 // 404 handler
 app.use((req, res) => {

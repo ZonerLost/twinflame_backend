@@ -2,7 +2,7 @@ const express = require("express");
 const router = express.Router();
 const Joi = require("joi");
 const chatController = require("../controllers/chat.controller");
-const { authenticate } = require("../middleware/auth");
+const { authenticate, requireActiveAccount } = require("../middleware/auth");
 const { validate } = require("../middleware/validate");
 
 const sendMessageSchema = Joi.object({
@@ -14,7 +14,7 @@ router.use(authenticate);
 
 router.get("/conversations", chatController.getConversations);
 router.get("/:conversationId/messages", chatController.getMessages);
-router.post("/:conversationId/messages", validate(sendMessageSchema), chatController.sendMessage);
+router.post("/:conversationId/messages", requireActiveAccount, validate(sendMessageSchema), chatController.sendMessage);
 router.put("/:conversationId/read", chatController.markAsRead);
 router.delete("/:conversationId/clear", chatController.clearChat);
 

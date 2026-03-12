@@ -5,6 +5,22 @@ class PostService {
 
   // ---- CREATE POST ----
   async createPost(userId, { content, imageUrl }) {
+    // Check for banned words in content
+    if (content) {
+      const { data: bannedWords } = await supabase
+        .from("banned_words")
+        .select("word");
+      const words = (bannedWords || []).map((w) => w.word.toLowerCase());
+      const textLower = content.toLowerCase();
+      const flagged = words.filter((w) => textLower.includes(w));
+      if (flagged.length > 0) {
+        throw Object.assign(
+          new Error("This text contains inappropriate language."),
+          { statusCode: 400 }
+        );
+      }
+    }
+
     const { data, error } = await supabase
       .from("posts")
       .insert({

@@ -68,6 +68,38 @@ const SUBSCRIPTION_STATUS = {
   PAST_DUE: "past_due",
 };
 
+const ACCOUNT_STATUS = {
+  ACTIVE: "active",
+  SUSPENDED: "suspended",
+  BANNED: "banned",
+};
+
+const REPORT_REASON = {
+  HARASSMENT: "harassment",
+  SPAM: "spam",
+  FAKE_PROFILE: "fake_profile",
+  INAPPROPRIATE_CONTENT: "inappropriate_content",
+  OTHER: "other",
+};
+
+const MODERATION_STATUS = {
+  PENDING_REVIEW: "pending_review",
+  APPROVED: "approved",
+  REJECTED: "rejected",
+};
+
+const FRIEND_REQUEST_STATUS = {
+  PENDING: "pending",
+  ACCEPTED: "accepted",
+  REJECTED: "rejected",
+};
+
+const FLAME_PACKAGES = {
+  "3_flames": { count: 3, price: 5.00 },
+  "10_flames": { count: 10, price: 12.00 },
+  "25_flames": { count: 25, price: 25.00 },
+};
+
 module.exports = {
   GENDER,
   MARITAL_STATUS,
@@ -78,4 +110,9 @@ module.exports = {
   AUTH_PROVIDERS,
   NOTIFICATION_TYPES,
   SUBSCRIPTION_STATUS,
+  ACCOUNT_STATUS,
+  REPORT_REASON,
+  MODERATION_STATUS,
+  FRIEND_REQUEST_STATUS,
+  FLAME_PACKAGES,
 };

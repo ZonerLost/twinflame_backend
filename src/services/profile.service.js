@@ -3,9 +3,31 @@ const { supabase } = require("../config/supabase");
 class ProfileService {
   // ---- PERSONAL INFO (Step 1) ----
   async updatePersonalInfo(userId, { fullName, biography }) {
+    // Check for banned words in biography
+    if (biography) {
+      const { data: bannedWords } = await supabase
+        .from("banned_words")
+        .select("word");
+      const words = (bannedWords || []).map((w) => w.word.toLowerCase());
+      const textLower = biography.toLowerCase();
+      const flagged = words.filter((w) => textLower.includes(w));
+      if (flagged.length > 0) {
+        throw Object.assign(
+          new Error("This text contains inappropriate language."),
+          { statusCode: 400 }
+        );
+      }
+    }
+
+    const updates = { full_name: fullName, biography, profile_step: Math.max(1) };
+    // Set bio moderation status to pending review if bio changed
+    if (biography) {
+      updates.bio_moderation_status = "pending_review";
+    }
+
     const { data, error } = await supabase
       .from("profiles")
-      .update({ full_name: fullName, biography, profile_step: Math.max(1) })
+      .update(updates)
       .eq("user_id", userId)
       .select()
       .single();
