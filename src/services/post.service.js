@@ -1,4 +1,5 @@
 const { supabase } = require("../config/supabase");
+const pushService = require("./push.service");
 
 class PostService {
   _bucketReady = false;
@@ -32,6 +33,8 @@ class PostService {
       .single();
 
     if (error) throw new Error(error.message);
+
+    await this._notifyUsersAboutNewPost(userId, data.id);
 
     // Return with author info
     const enriched = await this._enrichPosts([data], userId);
@@ -278,6 +281,61 @@ class PostService {
     } = supabase.storage.from("post-images").getPublicUrl(data.path);
 
     return publicUrl;
+  }
+
+  async _notifyUsersAboutNewPost(authorId, postId) {
+    const [{ data: authorProfile, error: authorError }, { data: recipients, error: recipientsError }] = await Promise.all([
+      supabase.from("profiles").select("full_name").eq("user_id", authorId).single(),
+      supabase
+        .from("users")
+        .select("id")
+        .neq("id", authorId)
+        .eq("notifications_enabled", true),
+    ]);
+
+    if (authorError) throw new Error(authorError.message);
+    if (recipientsError) throw new Error(recipientsError.message);
+
+    if (!recipients || recipients.length === 0) return;
+
+    const authorName = authorProfile?.full_name || "Someone";
+    const title = "New Post";
+    const subtitle = `${authorName} added a new post.`;
+    const notificationRows = recipients.map((recipient) => ({
+      user_id: recipient.id,
+      title,
+      subtitle,
+      type: "general",
+      metadata: {
+        screen: "home",
+        post_id: postId,
+        author_id: authorId,
+        author_name: authorName,
+      },
+    }));
+
+    const { data: insertedNotifications, error: insertError } = await supabase
+      .from("notifications")
+      .insert(notificationRows)
+      .select("id, user_id");
+
+    if (insertError) throw new Error(insertError.message);
+
+    await Promise.allSettled(
+      (insertedNotifications || []).map((notification) =>
+        pushService.sendToUser(notification.user_id, {
+          title,
+          body: subtitle,
+          data: {
+            screen: "home",
+            notification_id: notification.id,
+            post_id: postId,
+            author_id: authorId,
+            author_name: authorName,
+          },
+        })
+      )
+    );
   }
 
   // ---- HELPER: Create storage bucket if it doesn't exist ----

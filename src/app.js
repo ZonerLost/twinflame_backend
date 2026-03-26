@@ -18,6 +18,7 @@ const flameRoutes = require("./routes/flame.routes");
 const moderationRoutes = require("./routes/moderation.routes");
 const locationRoutes = require("./routes/location.routes");
 const friendRequestRoutes = require("./routes/friend-request.routes");
+const pushTokenRoutes = require("./routes/push-token.routes");
 
 const app = express();
 
@@ -47,6 +48,7 @@ app.use("/api/flames", flameRoutes);
 app.use("/api/moderation", moderationRoutes);
 app.use("/api/location", locationRoutes);
 app.use("/api/friend-requests", friendRequestRoutes);
+app.use("/api/push-tokens", pushTokenRoutes);
 
 // 404 handler
 app.use((req, res) => {
