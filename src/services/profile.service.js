@@ -20,7 +20,6 @@ class ProfileService {
     }
 
     const updates = { full_name: fullName, biography, profile_step: Math.max(1) };
-    // Set bio moderation status to pending review if bio changed
     if (biography) {
       updates.bio_moderation_status = "pending_review";
     }
@@ -36,7 +35,6 @@ class ProfileService {
     return data;
   }
 
-  // ---- GENDER (Step 2) ----
   async updateGender(userId, { gender }) {
     const { data, error } = await supabase
       .from("profiles")
@@ -49,7 +47,6 @@ class ProfileService {
     return data;
   }
 
-  // ---- MARITAL STATUS (Step 3) ----
   async updateMaritalStatus(userId, { maritalStatus }) {
     const { data, error } = await supabase
       .from("profiles")
@@ -62,9 +59,7 @@ class ProfileService {
     return data;
   }
 
-  // ---- PHOTOS (Step 4) ----
   async addPhoto(userId, { photoUrl, photoOrder, isPrimary = false }) {
-    // Check photo count limit
     const { count } = await supabase
       .from("profile_photos")
       .select("id", { count: "exact", head: true })
@@ -75,8 +70,9 @@ class ProfileService {
       throw Object.assign(new Error(`Maximum ${maxPhotos} photos allowed`), { statusCode: 400 });
     }
 
-    // If setting as primary, unset other primaries first
-    if (isPrimary) {
+    const shouldBePrimary = isPrimary || (count || 0) === 0;
+
+    if (shouldBePrimary) {
       await supabase
         .from("profile_photos")
         .update({ is_primary: false })
@@ -85,7 +81,12 @@ class ProfileService {
 
     const { data, error } = await supabase
       .from("profile_photos")
-      .insert({ user_id: userId, photo_url: photoUrl, photo_order: photoOrder, is_primary: isPrimary })
+      .insert({
+        user_id: userId,
+        photo_url: photoUrl,
+        photo_order: photoOrder,
+        is_primary: shouldBePrimary,
+      })
       .select()
       .single();
 
@@ -94,6 +95,15 @@ class ProfileService {
   }
 
   async deletePhoto(userId, photoId) {
+    const { data: targetPhoto, error: targetError } = await supabase
+      .from("profile_photos")
+      .select("id, is_primary")
+      .eq("id", photoId)
+      .eq("user_id", userId)
+      .single();
+
+    if (targetError) throw new Error(targetError.message);
+
     const { error } = await supabase
       .from("profile_photos")
       .delete()
@@ -101,6 +111,25 @@ class ProfileService {
       .eq("user_id", userId);
 
     if (error) throw new Error(error.message);
+
+    if (targetPhoto?.is_primary) {
+      const { data: nextPhoto } = await supabase
+        .from("profile_photos")
+        .select("id")
+        .eq("user_id", userId)
+        .order("photo_order", { ascending: true })
+        .limit(1)
+        .maybeSingle();
+
+      if (nextPhoto?.id) {
+        await supabase
+          .from("profile_photos")
+          .update({ is_primary: true })
+          .eq("id", nextPhoto.id)
+          .eq("user_id", userId);
+      }
+    }
+
     return { message: "Photo deleted" };
   }
 
@@ -132,9 +161,7 @@ class ProfileService {
     return urlData.publicUrl;
   }
 
-  // ---- LIFESTYLE (Step 5) ----
   async updateLifestyle(userId, { choices }) {
-    // Delete existing choices and insert new ones
     await supabase.from("lifestyle_choices").delete().eq("user_id", userId);
 
     if (choices && choices.length > 0) {
@@ -146,7 +173,6 @@ class ProfileService {
     return { choices };
   }
 
-  // ---- LOOKING FOR (Step 6) ----
   async updateLookingFor(userId, { lookingFor }) {
     const { data, error } = await supabase
       .from("profiles")
@@ -159,7 +185,6 @@ class ProfileService {
     return data;
   }
 
-  // ---- LOCATION (Step 7) ----
   async updateLocation(userId, { latitude, longitude, locationText }) {
     const point = `POINT(${longitude} ${latitude})`;
 
@@ -179,7 +204,6 @@ class ProfileService {
     return data;
   }
 
-  // ---- BELIEFS (Steps 8-16) ----
   async updateBeliefs(userId, beliefs) {
     const updateData = {};
     const beliefFields = [
@@ -211,7 +235,6 @@ class ProfileService {
     return data;
   }
 
-  // ---- DATE OF BIRTH (Step 17) ----
   async updateDateOfBirth(userId, { dateOfBirth }) {
     const { data, error } = await supabase
       .from("profiles")
@@ -224,14 +247,12 @@ class ProfileService {
     return data;
   }
 
-  // ---- COMPLETE PROFILE ----
   async completeProfile(userId) {
     await supabase
       .from("users")
       .update({ is_profile_complete: true })
       .eq("id", userId);
 
-    // Send notification
     await supabase.from("notifications").insert({
       user_id: userId,
       title: "Account Created!",
@@ -242,7 +263,6 @@ class ProfileService {
     return { message: "Profile completed" };
   }
 
-  // ---- UPDATE PROFILE STEP ----
   async updateProfileStep(userId, { step }) {
     const { data, error } = await supabase
       .from("profiles")
@@ -255,7 +275,6 @@ class ProfileService {
     return data;
   }
 
-  // ---- GET FULL PROFILE ----
   async getProfile(userId) {
     const { data: profile, error } = await supabase
       .from("profiles")
@@ -265,7 +284,6 @@ class ProfileService {
 
     if (error) throw new Error(error.message);
 
-    // Fetch related data in parallel
     const [photosRes, lifestyleRes, beliefsRes, userRes, authRes] = await Promise.all([
       supabase.from("profile_photos").select("*").eq("user_id", userId).order("photo_order"),
       supabase.from("lifestyle_choices").select("choice").eq("user_id", userId),
@@ -289,7 +307,6 @@ class ProfileService {
     };
   }
 
-  // ---- GET PROFILE BY USER ID (for viewing other users) ----
   async getPublicProfile(targetUserId) {
     const { data: profile, error } = await supabase
       .from("profiles")
@@ -313,9 +330,7 @@ class ProfileService {
     };
   }
 
-  // ---- EDIT PROFILE (from settings) ----
   async editProfile(userId, { fullName, email, phone, biography }) {
-    // Update profile fields
     const profileUpdate = {};
     if (fullName !== undefined) profileUpdate.full_name = fullName;
     if (biography !== undefined) profileUpdate.biography = biography;
@@ -324,7 +339,6 @@ class ProfileService {
       await supabase.from("profiles").update(profileUpdate).eq("user_id", userId);
     }
 
-    // Update email/phone via Supabase Auth admin API
     const authUpdate = {};
     if (email !== undefined) authUpdate.email = email;
     if (phone !== undefined) authUpdate.phone = phone;
@@ -337,7 +351,6 @@ class ProfileService {
     return this.getProfile(userId);
   }
 
-  // ---- UPDATE SETTINGS ----
   async updateSettings(userId, { notificationsEnabled, faceRecognitionEnabled }) {
     const update = {};
     if (notificationsEnabled !== undefined) update.notifications_enabled = notificationsEnabled;

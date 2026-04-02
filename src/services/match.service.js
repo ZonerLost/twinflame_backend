@@ -3,7 +3,6 @@ const { supabase } = require("../config/supabase");
 class MatchService {
   // ---- DISCOVER (get profiles to swipe) ----
   async discover(userId, { limit = 10, offset = 0, maxDistance, gender }) {
-    // Get current user's profile for location & preferences
     const { data: myProfile } = await supabase
       .from("profiles")
       .select("user_id, gender, looking_for, latitude, longitude")
@@ -14,83 +13,49 @@ class MatchService {
       throw Object.assign(new Error("Complete your profile first"), { statusCode: 400 });
     }
 
-    // Get IDs the user already swiped on
     const { data: swipedRows } = await supabase
       .from("swipes")
       .select("swiped_id")
       .eq("swiper_id", userId);
 
     const swipedIds = (swipedRows || []).map((r) => r.swiped_id);
-    swipedIds.push(userId); // Exclude self
 
-    // Get suspended/banned user IDs to exclude
     const { data: restrictedUsers } = await supabase
       .from("users")
       .select("id")
       .in("account_status", ["suspended", "banned"]);
 
     const restrictedIds = (restrictedUsers || []).map((u) => u.id);
-    const allExcluded = [...new Set([...swipedIds, ...restrictedIds])];
+    const hardExcludedIds = [...new Set([userId, ...restrictedIds])];
 
-    // Build query for discovering profiles
-    let query = supabase
-      .from("profiles")
-      .select(`
-        user_id, full_name, biography, gender, date_of_birth,
-        marital_status, looking_for, location_text, latitude, longitude
-      `)
-      .not("user_id", "in", `(${allExcluded.join(",")})`)
-      .not("full_name", "is", null)
-      .range(offset, offset + limit - 1);
-
-    // Filter by gender preference
-    if (gender) {
-      query = query.eq("gender", gender);
-    } else if (myProfile.looking_for) {
-      const genderFilter = this._getGenderFromLookingFor(myProfile.looking_for);
-      if (genderFilter) {
-        query = query.eq("gender", genderFilter);
-      }
-    }
-
-    const { data: profiles, error } = await query;
-    if (error) throw new Error(error.message);
-
-    // Fetch photos for discovered profiles
-    const profileIds = profiles.map((p) => p.user_id);
-
-    let photos = [];
-    if (profileIds.length > 0) {
-      const { data: photoData } = await supabase
-        .from("profile_photos")
-        .select("user_id, photo_url, photo_order, is_primary")
-        .in("user_id", profileIds)
-        .order("photo_order");
-      photos = photoData || [];
-    }
-
-    // Attach photos to profiles and calculate age
-    const result = profiles.map((profile) => {
-      const profilePhotos = photos.filter((p) => p.user_id === profile.user_id);
-      const age = profile.date_of_birth
-        ? Math.floor((Date.now() - new Date(profile.date_of_birth).getTime()) / (365.25 * 24 * 60 * 60 * 1000))
-        : null;
-
-      return {
-        ...profile,
-        age,
-        photos: profilePhotos,
-        primaryPhoto: profilePhotos.find((p) => p.is_primary)?.photo_url || profilePhotos[0]?.photo_url || null,
-      };
+    let profiles = await this._fetchDiscoverProfiles({
+      excludedIds: [...new Set([...hardExcludedIds, ...swipedIds])],
+      limit,
+      offset,
+      gender,
+      lookingFor: myProfile.looking_for,
     });
 
-    // If maxDistance and user has location, filter by distance
+    if (profiles.length === 0) {
+      profiles = await this._fetchDiscoverProfiles({
+        excludedIds: hardExcludedIds,
+        limit,
+        offset: 0,
+        gender,
+        lookingFor: myProfile.looking_for,
+      });
+    }
+
+    const result = await this._attachProfileMedia(profiles);
+
     if (maxDistance && myProfile.latitude && myProfile.longitude) {
       return result.filter((p) => {
         if (!p.latitude || !p.longitude) return true;
         const dist = this._calculateDistance(
-          myProfile.latitude, myProfile.longitude,
-          p.latitude, p.longitude
+          myProfile.latitude,
+          myProfile.longitude,
+          p.latitude,
+          p.longitude
         );
         return dist <= maxDistance;
       });
@@ -99,13 +64,11 @@ class MatchService {
     return result;
   }
 
-  // ---- SWIPE ----
   async swipe(userId, { swipedId, action }) {
     if (userId === swipedId) {
       throw Object.assign(new Error("Cannot swipe on yourself"), { statusCode: 400 });
     }
 
-    // Check daily swipe limit for free users
     const hasActiveSubscription = await this._hasActiveSubscription(userId);
     if (!hasActiveSubscription) {
       const dailyLimit = parseInt(process.env.DAILY_SWIPE_LIMIT_FREE) || 25;
@@ -123,7 +86,6 @@ class MatchService {
       }
     }
 
-    // Perform swipe (upsert to handle re-swipes)
     const { data, error } = await supabase
       .from("swipes")
       .upsert(
@@ -135,8 +97,6 @@ class MatchService {
 
     if (error) throw new Error(error.message);
 
-    // Check if it's a match (the DB trigger handles match creation,
-    // but we check here to return the match info to the client)
     let isMatch = false;
     let matchData = null;
 
@@ -151,7 +111,6 @@ class MatchService {
 
       if (mutualSwipe) {
         isMatch = true;
-        // Fetch match data
         const u1 = userId < swipedId ? userId : swipedId;
         const u2 = userId < swipedId ? swipedId : userId;
 
@@ -162,7 +121,6 @@ class MatchService {
           .eq("user2_id", u2)
           .single();
 
-        // Get matched user's profile
         const { data: matchedProfile } = await supabase
           .from("profiles")
           .select("user_id, full_name")
@@ -190,9 +148,7 @@ class MatchService {
     return { swipe: data, isMatch, matchData };
   }
 
-  // ---- GET MATCHES ----
   async getMatches(userId) {
-    // Get matches where user is either user1 or user2
     const { data: matches, error } = await supabase
       .from("matches")
       .select("id, user1_id, user2_id, matched_at, is_active")
@@ -202,7 +158,6 @@ class MatchService {
 
     if (error) throw new Error(error.message);
 
-    // Get the other user's profile for each match
     const otherUserIds = matches.map((m) =>
       m.user1_id === userId ? m.user2_id : m.user1_id
     );
@@ -239,7 +194,6 @@ class MatchService {
       const photo = photos.find((p) => p.user_id === otherUserId);
       const user = onlineStatus.find((u) => u.id === otherUserId);
 
-      // Consider "online" if last seen within 5 minutes
       const isOnline = user?.last_seen
         ? (Date.now() - new Date(user.last_seen).getTime()) < 5 * 60 * 1000
         : false;
@@ -258,7 +212,6 @@ class MatchService {
     });
   }
 
-  // ---- UNMATCH ----
   async unmatch(userId, matchId) {
     const { data: match } = await supabase
       .from("matches")
@@ -282,7 +235,65 @@ class MatchService {
     return { message: "Unmatched successfully" };
   }
 
-  // ---- HELPERS ----
+  async _fetchDiscoverProfiles({ excludedIds, limit, offset, gender, lookingFor }) {
+    let query = supabase
+      .from("profiles")
+      .select(`
+        user_id, full_name, biography, gender, date_of_birth,
+        marital_status, looking_for, location_text, latitude, longitude
+      `)
+      .not("full_name", "is", null)
+      .range(offset, offset + limit - 1);
+
+    if (excludedIds.length > 0) {
+      query = query.not("user_id", "in", `(${excludedIds.join(",")})`);
+    }
+
+    if (gender) {
+      query = query.eq("gender", gender);
+    } else if (lookingFor) {
+      const genderFilter = this._getGenderFromLookingFor(lookingFor);
+      if (genderFilter) {
+        query = query.eq("gender", genderFilter);
+      }
+    }
+
+    const { data, error } = await query;
+    if (error) throw new Error(error.message);
+    return data || [];
+  }
+
+  async _attachProfileMedia(profiles) {
+    if (!profiles || profiles.length === 0) return [];
+
+    const profileIds = profiles.map((p) => p.user_id);
+    let photos = [];
+
+    const { data: photoData } = await supabase
+      .from("profile_photos")
+      .select("user_id, photo_url, photo_order, is_primary")
+      .in("user_id", profileIds)
+      .order("photo_order");
+    photos = photoData || [];
+
+    return profiles.map((profile) => {
+      const profilePhotos = photos.filter((p) => p.user_id === profile.user_id);
+      const age = profile.date_of_birth
+        ? Math.floor((Date.now() - new Date(profile.date_of_birth).getTime()) / (365.25 * 24 * 60 * 60 * 1000))
+        : null;
+
+      return {
+        ...profile,
+        age,
+        photos: profilePhotos,
+        primaryPhoto:
+          profilePhotos.find((p) => p.is_primary)?.photo_url ||
+          profilePhotos[0]?.photo_url ||
+          null,
+      };
+    });
+  }
+
   _getGenderFromLookingFor(lookingFor) {
     switch (lookingFor) {
       case "males_for_females":
@@ -297,7 +308,7 @@ class MatchService {
   }
 
   _calculateDistance(lat1, lon1, lat2, lon2) {
-    const R = 6371; // Earth radius in km
+    const R = 6371;
     const dLat = ((lat2 - lat1) * Math.PI) / 180;
     const dLon = ((lon2 - lon1) * Math.PI) / 180;
     const a =
